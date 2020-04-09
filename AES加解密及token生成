@@ -1,0 +1,160 @@
+problem：之前使用DES加解密，出现在windows本地和liux服务器上生成加密密码不同的情况，经查找，原因可能为加密时设置位数进制的问题，修改后仍存在问题，后使用AES加密。
+code:
+
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.JWSObject;
+import com.nimbusds.jose.JWSSigner;
+import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.Payload;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jose.crypto.MACVerifier;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import org.bouncycastle.pqc.math.linearalgebra.ByteUtils;
+import org.manual.verification.config.Constants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.SecureRandom;
+import java.util.Date;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * @Author: zhaoyuqi
+ * @Date: 2020/2/24
+ */
+public class HashUtil {
+    private static Logger logger = LoggerFactory.getLogger(HashUtil.class);
+    //定义字符集
+    public static final String ENCODING = "UTF-8";
+    public static final String TOKEN_ISSUER = "jhhs";
+    public static final String TOKEN_KEY = "jiahemeikangjiahehaisendashujushiyebuyanfabumen";
+
+    //AES加密
+    public static String encrypt(String password, String salt) {
+        String cipherHexString = "";
+        try {
+            byte[] keyBytes = generateKey(salt);
+            SecretKeySpec sks = new SecretKeySpec(keyBytes, "AES");
+            //转二进制
+            byte[] clearTextBytes = password.getBytes(ENCODING);
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.ENCRYPT_MODE, sks);
+            byte[] cipherTextBytes = cipher.doFinal(clearTextBytes);
+            cipherHexString = ByteUtils.toHexString(cipherTextBytes);
+        } catch (Exception e) {
+            e.printStackTrace();
+            logger.error("使用AES加密失败：" + e.getMessage());
+        }
+        return cipherHexString;
+    }
+
+    private static byte[] generateKey(String password) throws Exception {
+        byte[] keyByteArray = null;
+        KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
+        // 兼容linux! 注意generator init只能是128位
+        SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
+        random.setSeed(password.getBytes(ENCODING));
+        keyGenerator.init(128, random);
+        SecretKey secretKey = keyGenerator.generateKey();
+        keyByteArray = secretKey.getEncoded();
+        return keyByteArray;
+    }
+
+    //解密
+    public static String decrypt(String password, String salt) {
+        String clearText = "";
+        try {
+            // 转换为AES专用密钥
+            byte[] keyBytes = generateKey(salt);
+            SecretKeySpec sks = new SecretKeySpec(keyBytes, "AES");
+            // 创建密码器
+            Cipher cipher = Cipher.getInstance("AES");
+            // 初始化为解密模式的密码器
+            cipher.init(Cipher.DECRYPT_MODE, sks);
+            byte[] cipherTextBytes = ByteUtils.fromHexString(password);
+            // 解密结果
+            byte[] clearTextBytes = cipher.doFinal(cipherTextBytes);
+            clearText = new String(clearTextBytes, ENCODING);
+        } catch (Exception e) {
+            e.printStackTrace();
+            logger.error("使用AES解密失败：" + e.getMessage());
+        }
+        logger.info("解密结果：" + clearText);
+        return clearText;
+    }
+
+    //生成token
+    public static String createToken(String userId, long expirationDate) {
+        try {
+            JWTClaimsSet.Builder builder = new JWTClaimsSet.Builder();
+            builder.claim(Constants.USER_ONLY_TAG, userId);
+            builder.issuer(TOKEN_ISSUER);
+            builder.subject(userId);
+            builder.issueTime(new Date());
+            builder.notBeforeTime(new Date());
+            builder.expirationTime(new Date(System.currentTimeMillis() + expirationDate));
+            builder.jwtID(UUID.randomUUID().toString());
+
+            JWTClaimsSet claimsSet = builder.build();
+            JWSHeader header = new JWSHeader(JWSAlgorithm.HS256);
+
+            Payload payload = new Payload(claimsSet.toJSONObject());
+
+            JWSObject jwsObject = new JWSObject(header, payload);
+
+            JWSSigner signer = new MACSigner(TOKEN_KEY.getBytes());
+            jwsObject.sign(signer);
+
+            return jwsObject.serialize();
+        } catch (JOSEException e) {
+            logger.error("create token occur exception : {} ", e.getMessage());
+            return null;
+        }
+    }
+
+    //从token中获取用户信息
+    public static String getUserIdFromToken(String token) {
+        try {
+            SignedJWT jwt = SignedJWT.parse(token);
+            JWSVerifier verifier = new MACVerifier(TOKEN_KEY.getBytes());
+
+            //校验是否有效
+            if (!jwt.verify(verifier)) {
+                logger.error("invalid token!");
+                return null;
+            }
+
+            //校验超时
+            Date expirationTime = jwt.getJWTClaimsSet().getExpirationTime();
+            if (new Date().after(expirationTime)) {
+                logger.error("token has been expired!");
+                return "401";
+            }
+
+            //获取载体中的数据
+            Object account = jwt.getJWTClaimsSet().getClaim(Constants.USER_ONLY_TAG);
+            //是否有账户信息
+            if (Objects.isNull(account)){
+                logger.error("get user from token not exist!");
+                return null;
+            }
+            return account.toString();
+        } catch (Exception e) {
+            logger.error("parse token occur exception : {}", e.getMessage());
+        }
+        return null;
+    }
+
+    public static String generateUUID() {
+        return UUID.randomUUID().toString().replaceAll("-", "");
+    }
+
+}
