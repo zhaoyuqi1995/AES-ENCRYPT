@@ -1,4 +1,5 @@
-problem：之前使用DES加解密，出现在windows本地和liux服务器上生成加密密码不同的情况，经查找，原因可能为加密时设置位数进制的问题，修改后仍存在问题，后使用AES加密。
+problem：之前使用DES加解密，将会导致 windows 和 linux 上生成的加密密码不同，经查找，原因可能为加密时设置位数进制的问题，修改后仍存在问题，后使用AES加密。
+
 code:
 
 import com.nimbusds.jose.JOSEException;
@@ -158,3 +159,9 @@ public class HashUtil {
     }
 
 }
+
+	<dependency>
+			<groupId>com.nimbusds</groupId>
+			<artifactId>nimbus-jose-jwt</artifactId>
+			<version>4.26.1</version>
+	</dependency>
